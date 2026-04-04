@@ -1,8 +1,10 @@
 services:
   web:
     image: 'gitlab/gitlab-ce:latest'
+    container_name: gitlab
     restart: always
     hostname: 'gitlab'
+    shm_size: '256mb'
     environment:
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'https://kalameet'
@@ -14,3 +16,31 @@ services:
       - '/srv/gitlab/config:/etc/gitlab'
       - '/srv/gitlab/logs:/var/log/gitlab'
       - '/srv/gitlab/data:/var/opt/gitlab'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/-/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    labels:
+      com.gitlab.description: "Self-hosted GitLab instance"
+      com.gitlab.backup: "/srv/gitlab/backups"
+    networks:
+      - gitlab-net
+
+networks:
+  gitlab-net:
+    driver: bridge
