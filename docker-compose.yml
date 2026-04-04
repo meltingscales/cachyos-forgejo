@@ -16,12 +16,6 @@ services:
       - '/srv/gitlab/config:/etc/gitlab'
       - '/srv/gitlab/logs:/var/log/gitlab'
       - '/srv/gitlab/data:/var/opt/gitlab'
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/-/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 300s
     logging:
       driver: "json-file"
       options:
