@@ -12,7 +12,7 @@ GITLAB_HOME := env_var_or_default("GITLAB_HOME", "/srv/gitlab")
 BACKUP_DIR := "./backups"
 
 # Number of backups to keep
-KEEP := 7
+KEEP := "7"
 
 # Python interpreter
 PYTHON := "python3"
