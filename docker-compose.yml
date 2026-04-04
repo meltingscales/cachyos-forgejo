@@ -2,7 +2,7 @@ services:
   web:
     image: 'gitlab/gitlab-ce:latest'
     restart: always
-    hostname: 'cachyos-gitlab'
+    hostname: 'gitlab'
     environment:
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'https://kalameet'
