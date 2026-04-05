@@ -34,6 +34,7 @@ import sys
 from datetime import datetime
 
 import requests
+from tqdm import tqdm
 
 if os.path.exists('.env'):
     from dotenv import load_dotenv
@@ -45,6 +46,11 @@ GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 FORGEJO_URL = os.getenv('FORGEJO_URL', '').rstrip('/')
 FORGEJO_TOKEN = os.getenv('FORGEJO_TOKEN')
 INCLUDE_FORKS = os.getenv('INCLUDE_FORKS', 'false').lower() == 'true'
+
+# SSL certificate verification (for self-signed certs)
+CA_CERT = os.getenv('CA_CERT', 'caddy-ca.crt')
+VERIFY_SSL = os.getenv('VERIFY_SSL', 'true').lower() == 'true'
+VERIFY = CA_CERT if VERIFY_SSL and os.path.exists(CA_CERT) else VERIFY_SSL
 
 
 def github_headers():
@@ -59,6 +65,10 @@ def forgejo_headers():
         'Authorization': f'token {FORGEJO_TOKEN}',
         'Content-Type': 'application/json',
     }
+
+
+def verify_ssl():
+    return VERIFY
 
 
 def get_github_repos():
@@ -97,7 +107,7 @@ def get_github_repos():
 
 
 def get_forgejo_username():
-    response = requests.get(f'{FORGEJO_URL}/api/v1/user', headers=forgejo_headers())
+    response = requests.get(f'{FORGEJO_URL}/api/v1/user', headers=forgejo_headers(), verify=verify_ssl())
     if response.status_code != 200:
         print(f"Error fetching Forgejo user (HTTP {response.status_code}): {response.text}", file=sys.stderr)
         sys.exit(1)
@@ -108,6 +118,7 @@ def get_or_create_forgejo_repo(forgejo_username, repo_name, repo_description, is
     response = requests.get(
         f'{FORGEJO_URL}/api/v1/repos/{forgejo_username}/{repo_name}',
         headers=forgejo_headers(),
+        verify=verify_ssl(),
     )
     if response.status_code == 200:
         return response.json()['clone_url']
@@ -122,6 +133,7 @@ def get_or_create_forgejo_repo(forgejo_username, repo_name, repo_description, is
         f'{FORGEJO_URL}/api/v1/user/repos',
         headers=forgejo_headers(),
         json=payload,
+        verify=verify_ssl(),
     )
     if response.status_code not in (200, 201):
         print(f"  Error creating Forgejo repo {repo_name} (HTTP {response.status_code}): {response.text}", file=sys.stderr)
@@ -214,10 +226,9 @@ def main():
 
     results = {}
 
-    for repo in repos:
+    for repo in tqdm(repos, desc="Migrating repositories", unit="repo"):
         repo_name = repo['name']
         full_name = repo['full_name']
-        print(f"[{repo_name}]")
 
         local_path = os.path.join(WORKSPACE, repo_name + '.git')
         github_url = authenticated_github_clone_url(full_name)
@@ -239,7 +250,7 @@ def main():
         forgejo_push_url = authenticated_forgejo_push_url(forgejo_clone_url)
         ok = push_mirror(local_path, forgejo_push_url)
         results[repo_name] = ok
-        print(f"  {'OK' if ok else 'FAILED'}")
+        tqdm.write(f"  {'OK' if ok else 'FAILED'}: {repo_name}")
 
     write_log(results)
 
