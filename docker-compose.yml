@@ -1,4 +1,18 @@
 services:
+  caddy:
+    image: caddy:2
+    container_name: forgejo-caddy
+    restart: always
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - './Caddyfile:/etc/caddy/Caddyfile:ro'
+      - 'caddy-data:/data'
+      - 'caddy-config:/config'
+    networks:
+      - forgejo-net
+
   server:
     image: 'codeberg.org/forgejo/forgejo:14'
     container_name: forgejo
@@ -6,8 +20,9 @@ services:
     environment:
       - USER_UID=1000
       - USER_GID=1000
+    expose:
+      - '3000'
     ports:
-      - '3000:3000'
       - '2222:22'
     volumes:
       - '/srv/forgejo:/data'
@@ -52,8 +67,9 @@ services:
     depends_on:
       - server
       - docker
+    user: root
     environment:
-      - FORGEJO_INSTANCE_URL=http://kalameet:3000
+      - FORGEJO_INSTANCE_URL=https://kalameet
       - FORGEJO_RUNNER_REGISTRATION_TOKEN=${RUNNER_TOKEN}
       - DOCKER_HOST=tcp://docker:2376
       - DOCKER_TLS_VERIFY=1
@@ -61,11 +77,14 @@ services:
     volumes:
       - '/srv/forgejo-runner:/data'
       - 'dind-certs:/certs:ro'
+      - './caddy-ca.crt:/usr/local/share/ca-certificates/caddy-ca.crt:ro'
     networks:
       - forgejo-net
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        # Add Caddy CA to system trust store
+        cat /usr/local/share/ca-certificates/caddy-ca.crt >> /etc/ssl/certs/ca-certificates.crt
         if [ ! -f /data/.runner ]; then
           forgejo-runner register \
             --instance $$FORGEJO_INSTANCE_URL \
@@ -81,5 +100,7 @@ networks:
     driver: bridge
 
 volumes:
+  caddy-data:
+  caddy-config:
   dind-data:
   dind-certs:

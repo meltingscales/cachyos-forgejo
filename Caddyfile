@@ -1,0 +1,18 @@
+{
+	# Use internal CA for self-signed certificates
+	cert_issuer internal
+}
+
+kalameet {
+	# Reverse proxy to Forgejo
+	reverse_proxy server:3000
+
+	# WebSocket support
+	header Upgrade {http.request.Header.Upgrade}
+	header Connection {http.request.Header.Connection}
+
+	# Security headers
+	header X-Frame-Options "SAMEORIGIN"
+	header X-Content-Type-Options "nosniff"
+	header Referrer-Policy "no-referrer"
+}
