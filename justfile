@@ -118,6 +118,34 @@ setup:
     mkdir -p {{BACKUP_DIR}}
     echo "Setup complete. Scripts are now executable."
 
+# Migrate GitHub repositories to Forgejo
+migrate-github:
+    #!/usr/bin/env bash
+    if [ ! -f ".env" ]; then
+        echo "Error: .env file not found"
+        echo "Create a .env file with:"
+        echo "  GITHUB_USERNAME=your_username"
+        echo "  GITHUB_TOKEN=your_github_token"
+        echo "  FORGEJO_URL=https://kalameet"
+        echo "  FORGEJO_TOKEN=your_forgejo_token"
+        exit 1
+    fi
+    uv run migrate-github-to-forgejo.py
+
+# Migrate GitHub repos (include forks)
+migrate-github-all:
+    #!/usr/bin/env bash
+    if [ ! -f ".env" ]; then
+        echo "Error: .env file not found"
+        echo "Create a .env file with:"
+        echo "  GITHUB_USERNAME=your_username"
+        echo "  GITHUB_TOKEN=your_github_token"
+        echo "  FORGEJO_URL=https://kalameet"
+        echo "  FORGEJO_TOKEN=your_forgejo_token"
+        exit 1
+    fi
+    INCLUDE_FORKS=true uv run migrate-github-to-forgejo.py
+
 # Verify backup integrity (extracts to temp and checks)
 verify-backup archive:
     #!/usr/bin/env bash
