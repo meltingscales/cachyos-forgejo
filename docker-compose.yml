@@ -31,15 +31,17 @@ services:
     networks:
       - forgejo-net
 
-  dind:
+  docker:
     image: 'docker:dind'
     container_name: forgejo-dind
+    hostname: docker
     restart: always
     privileged: true
     environment:
-      - DOCKER_TLS_CERTDIR=
+      - DOCKER_TLS_CERTDIR=/certs
     volumes:
       - 'dind-data:/var/lib/docker'
+      - 'dind-certs:/certs'
     networks:
       - forgejo-net
 
@@ -49,14 +51,16 @@ services:
     restart: always
     depends_on:
       - server
-      - dind
+      - docker
     environment:
       - FORGEJO_INSTANCE_URL=http://kalameet:3000
       - FORGEJO_RUNNER_REGISTRATION_TOKEN=${RUNNER_TOKEN}
-      - DOCKER_HOST=tcp://dind:2375
-      - DOCKER_TLS_VERIFY=0
+      - DOCKER_HOST=tcp://docker:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
     volumes:
       - '/srv/forgejo-runner:/data'
+      - 'dind-certs:/certs:ro'
     networks:
       - forgejo-net
     entrypoint: ["/bin/sh", "-c"]
@@ -78,3 +82,4 @@ networks:
 
 volumes:
   dind-data:
+  dind-certs:
