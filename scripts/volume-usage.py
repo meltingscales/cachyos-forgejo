@@ -37,7 +37,10 @@ def get_volumes():
             print("No Docker Compose project found.", file=sys.stderr)
             sys.exit(1)
 
-        project_name = compose_data[0].get('Name', '').split('-')[0]  # Remove service suffix
+        project_name = compose_data[0].get('Project', '')
+        if not project_name:
+            print("Could not determine project name from compose data.", file=sys.stderr)
+            sys.exit(1)
     except (json.JSONDecodeError, IndexError, KeyError):
         print("Could not determine project name.", file=sys.stderr)
         sys.exit(1)
