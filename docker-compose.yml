@@ -37,10 +37,8 @@ services:
     restart: always
     privileged: true
     environment:
-      - DOCKER_TLS_CERTDIR=/certs
+      - DOCKER_TLS_CERTDIR=
     volumes:
-      - 'dind-certs-ca:/certs/ca'
-      - 'dind-certs-client:/certs/client'
       - 'dind-data:/var/lib/docker'
     networks:
       - forgejo-net
@@ -55,11 +53,9 @@ services:
     environment:
       - FORGEJO_INSTANCE_URL=http://kalameet:3000
       - FORGEJO_RUNNER_REGISTRATION_TOKEN=${RUNNER_TOKEN}
-      - DOCKER_HOST=tcp://dind:2376
-      - DOCKER_TLS_VERIFY=1
-      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_HOST=tcp://dind:2375
+      - DOCKER_TLS_VERIFY=0
     volumes:
-      - 'dind-certs-client:/certs/client:ro'
       - '/srv/forgejo-runner:/data'
     networks:
       - forgejo-net
@@ -81,6 +77,4 @@ networks:
     driver: bridge
 
 volumes:
-  dind-certs-ca:
-  dind-certs-client:
   dind-data:
