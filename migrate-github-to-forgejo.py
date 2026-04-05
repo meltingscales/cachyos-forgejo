@@ -53,6 +53,10 @@ CA_CERT = os.getenv('CA_CERT', 'caddy-ca.crt')
 VERIFY_SSL = os.getenv('VERIFY_SSL', 'true').lower() == 'true'
 VERIFY = CA_CERT if VERIFY_SSL and os.path.exists(CA_CERT) else VERIFY_SSL
 
+# Validation settings
+VALIDATE_SAMPLE_COUNT = int(os.getenv('VALIDATE_SAMPLE_COUNT', '3'))
+VALIDATE_REPOS = os.getenv('VALIDATE_REPOS', 'true').lower() == 'true'
+
 
 def github_headers():
     return {
@@ -202,6 +206,65 @@ def push_mirror(local_path, forgejo_push_url):
     return True
 
 
+def validate_repos(succeeded_repos, forgejo_username, sample_count=3):
+    """Validate that migrated repos exist and have commits on Forgejo."""
+    if not succeeded_repos:
+        return True
+
+    print(f"\nValidating {len(succeeded_repos)} migrated repositories (sampling {sample_count} commits each)...")
+
+    validated = 0
+    failed_validations = []
+
+    for repo_name in tqdm(succeeded_repos, desc="Validating", unit="repo"):
+        local_path = os.path.join(WORKSPACE, repo_name + '.git')
+
+        # Get sample commits from local mirror
+        result = subprocess.run(
+            ['git', 'log', '--format=%H', '-n', str(sample_count)],
+            cwd=local_path,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            failed_validations.append((repo_name, "Failed to get commits"))
+            continue
+
+        commits = result.stdout.strip().split('\n')
+        if not commits or commits[0] == '':
+            failed_validations.append((repo_name, "No commits found"))
+            continue
+
+        # Verify these commits exist on Forgejo via API
+        all_valid = True
+        for commit in commits:
+            response = requests.get(
+                f'{FORGEJO_URL}/api/v1/repos/{forgejo_username}/{repo_name}/git/commits/{commit}',
+                headers=forgejo_headers(),
+                verify=verify_ssl(),
+                timeout=10
+            )
+            if response.status_code != 200:
+                all_valid = False
+                break
+
+        if all_valid:
+            validated += 1
+        else:
+            failed_validations.append((repo_name, "Commits not found on Forgejo"))
+
+    print(f"\nValidation complete: {validated}/{len(succeeded_repos)} repositories verified")
+
+    if failed_validations:
+        print("\nFailed validations:")
+        for repo_name, reason in failed_validations:
+            tqdm.write(f"  ✗ {repo_name}: {reason}")
+        return False
+
+    return True
+
+
 def write_log(results):
     os.makedirs(WORKSPACE, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -278,6 +341,11 @@ def main():
         tqdm.write(f"  {'OK' if ok else 'FAILED'}: {repo_name}")
 
     write_log(results)
+
+    # Validate succeeded repos
+    succeeded = [name for name, ok in results.items() if ok]
+    if succeeded and VALIDATE_REPOS:
+        validate_repos(succeeded, forgejo_username, sample_count=VALIDATE_SAMPLE_COUNT)
 
     succeeded = sum(1 for ok in results.values() if ok)
     print(f"\nDone: {succeeded}/{len(results)} repositories migrated successfully.")
