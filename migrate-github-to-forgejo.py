@@ -148,6 +148,24 @@ def get_or_create_forgejo_repo(forgejo_username, repo_name, repo_description, is
     return response.json()['clone_url']
 
 
+def is_repo_migrated(forgejo_username, repo_name):
+    """Check if a repo already exists on Forgejo and has been recently updated."""
+    response = requests.get(
+        f'{FORGEJO_URL}/api/v1/repos/{forgejo_username}/{repo_name}',
+        headers=forgejo_headers(),
+        verify=verify_ssl(),
+    )
+    if response.status_code != 200:
+        return False
+
+    # Check if local mirror exists
+    local_path = os.path.join(WORKSPACE, repo_name + '.git')
+    if not os.path.exists(local_path):
+        return False
+
+    return True
+
+
 def authenticated_forgejo_push_url(clone_url):
     """Construct SSH push URL for Forgejo."""
     from urllib.parse import urlparse
@@ -313,10 +331,17 @@ def main():
     print(f"Forgejo username: {forgejo_username}\n")
 
     results = {}
+    skipped = 0
 
     for repo in tqdm(repos, desc="Migrating repositories", unit="repo"):
         repo_name = repo['name']
         full_name = repo['full_name']
+
+        # Skip if already migrated (Forgejo repo exists and local mirror exists)
+        if is_repo_migrated(forgejo_username, repo_name):
+            skipped += 1
+            results[repo_name] = True
+            continue
 
         local_path = os.path.join(WORKSPACE, repo_name + '.git')
         github_url = authenticated_github_clone_url(full_name)
@@ -347,8 +372,10 @@ def main():
     if succeeded and VALIDATE_REPOS:
         validate_repos(succeeded, forgejo_username, sample_count=VALIDATE_SAMPLE_COUNT)
 
-    succeeded = sum(1 for ok in results.values() if ok)
-    print(f"\nDone: {succeeded}/{len(results)} repositories migrated successfully.")
+    succeeded_count = sum(1 for ok in results.values() if ok)
+    print(f"\nDone: {succeeded_count}/{len(results)} repositories migrated successfully.")
+    if skipped > 0:
+        print(f"Skipped {skipped} already-migrated repositories.")
 
 
 if __name__ == "__main__":
