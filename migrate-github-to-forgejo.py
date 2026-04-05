@@ -145,9 +145,16 @@ def get_or_create_forgejo_repo(forgejo_username, repo_name, repo_description, is
 
 def authenticated_forgejo_push_url(clone_url):
     """Embed the Forgejo token into the HTTPS remote URL."""
+    from urllib.parse import urlparse
+
+    # Parse the clone URL to get the path
+    parsed = urlparse(clone_url)
+    path = parsed.path.lstrip('/')
+
+    # Construct authenticated URL using FORGEJO_URL (without port)
     host = FORGEJO_URL.removeprefix('https://').removeprefix('http://')
     scheme = 'https' if FORGEJO_URL.startswith('https') else 'http'
-    return f'{scheme}://{FORGEJO_TOKEN}@{host}/{clone_url.split(host, 1)[1].lstrip("/")}'
+    return f'{scheme}://{FORGEJO_TOKEN}@{host}/{path}'
 
 
 def authenticated_github_clone_url(full_name):
