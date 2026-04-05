@@ -181,7 +181,25 @@ def mirror_or_update(github_url, local_path):
 
 def push_mirror(local_path, forgejo_push_url):
     print(f"  Pushing to Forgejo...")
-    return run(['git', 'push', '--mirror', forgejo_push_url], cwd=local_path, label='git push --mirror')
+    # Push all refs except GitHub-specific hidden refs (pull/*)
+    result = subprocess.run(
+        ['git', 'push', '--mirror', forgejo_push_url],
+        cwd=local_path,
+        capture_output=True,
+        text=True
+    )
+
+    # Check if push failed only due to hidden refs (GitHub PR refs)
+    if result.returncode != 0:
+        stderr = result.stderr
+        if 'remote rejected' in stderr and 'hidden ref' in stderr:
+            # Check if actual branches/tags were pushed by looking for successful refs
+            if any(x in stderr for x in ['->', '[new branch]', '[new tag]']):
+                print(f"  Note: Some GitHub-specific refs (PR refs) were skipped")
+                return True
+        return False
+
+    return True
 
 
 def write_log(results):
