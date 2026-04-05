@@ -45,6 +45,7 @@ GITHUB_USERNAME = os.getenv('GITHUB_USERNAME')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 FORGEJO_URL = os.getenv('FORGEJO_URL', '').rstrip('/')
 FORGEJO_TOKEN = os.getenv('FORGEJO_TOKEN')
+FORGEJO_SSH_PORT = os.getenv('FORGEJO_SSH_PORT', '2222')
 INCLUDE_FORKS = os.getenv('INCLUDE_FORKS', 'false').lower() == 'true'
 
 # SSL certificate verification (for self-signed certs)
@@ -153,7 +154,7 @@ def authenticated_forgejo_push_url(clone_url):
 
     # Get SSH host from FORGEJO_URL
     host = FORGEJO_URL.removeprefix('https://').removeprefix('http://')
-    return f'git@{host}:{path}'
+    return f'ssh://git@{host}:{FORGEJO_SSH_PORT}/{path}'
 
 
 def authenticated_github_clone_url(full_name):
