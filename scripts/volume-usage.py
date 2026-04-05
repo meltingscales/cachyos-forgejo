@@ -14,53 +14,65 @@ from pathlib import Path
 
 def get_volumes():
     """Get list of Docker Compose volumes."""
+    # Get current project name from docker compose
     try:
         result = subprocess.run(
-            ['docker', 'compose', 'ls', '--format', 'json'],
+            ['docker', 'compose', 'ps', '--format', 'json'],
             capture_output=True,
             text=True,
             check=True
         )
     except subprocess.CalledProcessError as e:
-        print(f"Error getting Docker Compose projects: {e}", file=sys.stderr)
+        print(f"Error getting Docker Compose info: {e}", file=sys.stderr)
         sys.exit(1)
 
     if not result.stdout.strip():
-        print("No Docker Compose projects found.", file=sys.stderr)
+        print("No Docker Compose project found.", file=sys.stderr)
         sys.exit(1)
 
-    projects = json.loads(result.stdout)
+    # Get project name from compose output
+    try:
+        compose_data = json.loads(result.stdout)
+        if not compose_data:
+            print("No Docker Compose project found.", file=sys.stderr)
+            sys.exit(1)
+
+        project_name = compose_data[0].get('Name', '').split('-')[0]  # Remove service suffix
+    except (json.JSONDecodeError, IndexError, KeyError):
+        print("Could not determine project name.", file=sys.stderr)
+        sys.exit(1)
+
+    # Get all volumes and filter by project name
     volumes = {}
+    try:
+        result = subprocess.run(
+            ['docker', 'volume', 'ls', '--format', '{{.Name}}'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except subprocess.CalledProcessError:
+        return {}
 
-    for project in projects:
-        project_name = project.get('Name', 'unknown')
-
-        # Get volumes for this project
-        try:
-            result = subprocess.run(
-                ['docker', 'inspect', 'volume'],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-        except subprocess.CalledProcessError:
+    for vol_name in result.stdout.strip().split('\n'):
+        if not vol_name:
             continue
 
-        if result.returncode != 0:
-            continue
-
-        try:
-            volume_data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            continue
-
-        for vol in volume_data:
-            vol_name = vol.get('Name', '')
-            mountpoint = vol.get('Mountpoint', '')
-
-            # Only include volumes from our project
-            if project_name.lower() in vol_name.lower():
-                volumes[vol_name] = mountpoint
+        # Only include volumes from our project
+        if project_name.lower() in vol_name.lower():
+            try:
+                inspect_result = subprocess.run(
+                    ['docker', 'volume', 'inspect', vol_name],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                vol_data = json.loads(inspect_result.stdout)
+                mountpoint = vol_data[0].get('Mountpoint', '')
+                if mountpoint:
+                    volumes[vol_name] = mountpoint
+            except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError):
+                continue
 
     return volumes
 
