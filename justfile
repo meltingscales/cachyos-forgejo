@@ -112,9 +112,14 @@ du-backups:
         echo "Backup directory does not exist: {{BACKUP_DIR}}"
     fi
 
+# Show Docker Compose volume usage
+volume-usage:
+    #!/usr/bin/env bash
+    {{PYTHON}} scripts/volume-usage.py
+
 # Make scripts executable
 setup:
-    chmod +x scripts/backup.py scripts/restore.py
+    chmod +x scripts/backup.py scripts/restore.py scripts/volume-usage.py
     mkdir -p {{BACKUP_DIR}}
     echo "Setup complete. Scripts are now executable."
 
