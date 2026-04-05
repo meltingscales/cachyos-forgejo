@@ -106,6 +106,11 @@ def get_top_directories(mountpoint, limit=10):
 def main():
     volumes = get_volumes()
 
+    # Add /srv/forgejo (Forgejo data directory)
+    forgejo_data = '/srv/forgejo'
+    if os.path.exists(forgejo_data):
+        volumes['/srv/forgejo (bind mount)'] = forgejo_data
+
     if not volumes:
         print("No Docker Compose volumes found.")
         return
