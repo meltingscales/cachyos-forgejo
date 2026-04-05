@@ -63,6 +63,16 @@ services:
       - '/srv/forgejo-runner:/data'
     networks:
       - forgejo-net
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /data/.runner ]; then
+          forgejo-runner register \
+            --instance $$FORGEJO_INSTANCE_URL \
+            --token $$FORGEJO_RUNNER_REGISTRATION_TOKEN \
+            --name forgejo-runner \
+            --no-interactive
+        fi && forgejo-runner daemon
     labels:
       com.forgejo.description: "Forgejo Actions Runner"
 
