@@ -1,21 +1,17 @@
 services:
-  web:
-    image: 'gitlab/gitlab-ce:latest'
-    container_name: gitlab
+  server:
+    image: 'codeberg.org/forgejo/forgejo:14'
+    container_name: forgejo
     restart: always
-    hostname: 'gitlab'
-    shm_size: '256mb'
     environment:
-      GITLAB_OMNIBUS_CONFIG: |
-        external_url 'https://kalameet'
+      - USER_UID=1000
+      - USER_GID=1000
     ports:
-      - '80:80'
-      - '443:443'
+      - '3000:3000'
       - '2222:22'
     volumes:
-      - '/srv/gitlab/config:/etc/gitlab'
-      - '/srv/gitlab/logs:/var/log/gitlab'
-      - '/srv/gitlab/data:/var/opt/gitlab'
+      - '/srv/forgejo:/data'
+      - '/etc/localtime:/etc/localtime:ro'
     logging:
       driver: "json-file"
       options:
@@ -25,16 +21,16 @@ services:
       resources:
         limits:
           cpus: '4'
-          memory: 8G
+          memory: 2G
         reservations:
-          cpus: '2'
-          memory: 4G
+          cpus: '1'
+          memory: 512M
     labels:
-      com.gitlab.description: "Self-hosted GitLab instance"
-      com.gitlab.backup: "/srv/gitlab/backups"
+      com.forgejo.description: "Self-hosted Forgejo instance"
+      com.forgejo.backup: "/srv/forgejo/backups"
     networks:
-      - gitlab-net
+      - forgejo-net
 
 networks:
-  gitlab-net:
+  forgejo-net:
     driver: bridge

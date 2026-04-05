@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-GitLab Backup Script
+Forgejo Backup Script
 
-Backs up a self-hosted GitLab instance running in Docker.
-Backs up configuration, logs, data, and creates a database dump.
+Backs up a self-hosted Forgejo instance running in Docker.
+Backs up data directory and optionally runs `forgejo dump` for a complete dump.
 """
 
 import argparse
@@ -55,10 +55,10 @@ def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProce
     return result
 
 
-def get_gitlab_home() -> Path:
-    """Get the GITLAB_HOME directory from environment or default."""
-    gitlab_home = os.environ.get("GITLAB_HOME", "/srv/gitlab")
-    return Path(gitlab_home)
+def get_forgejo_home() -> Path:
+    """Get the FORGEJO_HOME directory from environment or default."""
+    forgejo_home = os.environ.get("FORGEJO_HOME", "/srv/forgejo")
+    return Path(forgejo_home)
 
 
 def check_docker_running() -> bool:
@@ -70,11 +70,18 @@ def check_docker_running() -> bool:
         return False
 
 
-def get_gitlab_container_name() -> str | None:
-    """Get the name of the running GitLab container."""
+def get_forgejo_container_name() -> str | None:
+    """Get the name of the running Forgejo container."""
     try:
         result = run_command(
-            ["docker", "ps", "--filter", "ancestor=gitlab/gitlab-ce", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", "ancestor=codeberg.org/forgejo/forgejo:14", "--format", "{{.Names}}"],
+            check=False
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split("\n")[0]
+        # Fallback: search by container name
+        result = run_command(
+            ["docker", "ps", "--filter", "name=forgejo", "--format", "{{.Names}}"],
             check=False
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -91,32 +98,38 @@ def create_backup_directory(backup_dir: Path) -> Path:
 
 
 def create_backup_archive(
-    gitlab_home: Path,
+    forgejo_home: Path,
     backup_dir: Path,
     timestamp: str,
     include_logs: bool = False,
 ) -> Path:
-    """Create a compressed archive of GitLab data."""
-    archive_name = f"gitlab-backup-{timestamp}"
+    """Create a compressed archive of Forgejo data."""
+    archive_name = f"forgejo-backup-{timestamp}"
     archive_path = backup_dir / f"{archive_name}.tar.gz"
 
     log_info(f"Creating backup archive: {archive_path}")
 
-    # Build list of directories to backup
+    # Forgejo stores everything under the data volume root
     dirs_to_backup = [
-        (gitlab_home / "config", "config"),
-        (gitlab_home / "data", "data"),
+        (forgejo_home / "gitea", "gitea"),   # config and internal data
+        (forgejo_home / "git", "git"),        # git repositories
+        (forgejo_home / "ssh", "ssh"),        # SSH host keys
     ]
 
+    optional_dirs = ["avatars", "attachments", "lfs", "packages"]
+    for d in optional_dirs:
+        if (forgejo_home / d).exists():
+            dirs_to_backup.append((forgejo_home / d, d))
+
     if include_logs:
-        dirs_to_backup.append((gitlab_home / "logs", "logs"))
+        if (forgejo_home / "log").exists():
+            dirs_to_backup.append((forgejo_home / "log", "log"))
 
     # Create temporary directory for structured backup
     temp_dir = backup_dir / f"{archive_name}-temp"
     temp_dir.mkdir(exist_ok=True)
 
     try:
-        # Copy/sync directories to temp location
         for src_dir, dir_name in dirs_to_backup:
             if not src_dir.exists():
                 log_warning(f"Source directory does not exist: {src_dir}")
@@ -125,7 +138,6 @@ def create_backup_archive(
             dest_dir = temp_dir / dir_name
             log_info(f"Copying {dir_name}...")
 
-            # Use rsync if available, otherwise use shutil.copytree
             try:
                 run_command([
                     "rsync", "-a", "--delete",
@@ -137,7 +149,7 @@ def create_backup_archive(
         # Create metadata file
         metadata = {
             "timestamp": timestamp,
-            "gitlab_home": str(gitlab_home),
+            "forgejo_home": str(forgejo_home),
             "include_logs": include_logs,
             "backup_type": "full",
         }
@@ -147,7 +159,6 @@ def create_backup_archive(
             for key, value in metadata.items():
                 f.write(f"{key}={value}\n")
 
-        # Create the compressed archive
         log_info("Compressing backup...")
         run_command([
             "tar", "-czf", str(archive_path),
@@ -159,59 +170,49 @@ def create_backup_archive(
         return archive_path
 
     finally:
-        # Clean up temp directory
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
 
 
-def create_database_backup(
+def create_forgejo_dump(
     container_name: str,
     backup_dir: Path,
     timestamp: str,
 ) -> Path | None:
-    """Create a GitLab database backup using the built-in rake task."""
-    backup_file = backup_dir / f"gitlab-db-backup-{timestamp}.tar"
+    """Create a Forgejo dump using the built-in dump command."""
+    dump_file = backup_dir / f"forgejo-dump-{timestamp}.zip"
 
-    log_info("Creating database backup using gitlab-rake...")
+    log_info("Creating Forgejo dump...")
 
-    # Create the backup directory inside the container
     result = run_command([
-        "docker", "exec", container_name,
-        "gitlab-rake", "gitlab:backup:create"
+        "docker", "exec", "-u", "git", container_name,
+        "forgejo", "dump",
+        "--config", "/data/gitea/conf/app.ini",
+        "--file", f"/tmp/forgejo-dump-{timestamp}.zip",
+        "--type", "zip",
     ], check=False)
 
     if result.returncode != 0:
-        log_warning("Database backup command failed, continuing...")
+        log_warning("Forgejo dump command failed, continuing without dump...")
         return None
 
-    # Find the created backup file
-    # GitLab creates backups in /var/opt/gitlab/backups
-    find_result = run_command([
-        "docker", "exec", container_name,
-        "find", "/var/opt/gitlab/backups",
-        "-name", "*.tar",
-        "-mtime", "-1",
-        "-printf", "%T@ %p\n"
+    copy_result = run_command([
+        "docker", "cp",
+        f"{container_name}:/tmp/forgejo-dump-{timestamp}.zip",
+        str(dump_file)
     ], check=False)
 
-    if find_result.returncode == 0 and find_result.stdout.strip():
-        # Get the most recent backup
-        lines = find_result.stdout.strip().split("\n")
-        if lines:
-            latest_backup = sorted(lines, reverse=True)[0].split(" ", 1)[1]
+    # Clean up temp file in container
+    run_command([
+        "docker", "exec", container_name,
+        "rm", "-f", f"/tmp/forgejo-dump-{timestamp}.zip"
+    ], check=False)
 
-            # Copy the backup from container to host
-            copy_result = run_command([
-                "docker", "cp",
-                f"{container_name}:{latest_backup}",
-                str(backup_file)
-            ], check=False)
+    if copy_result.returncode == 0:
+        log_success(f"Forgejo dump: {dump_file}")
+        return dump_file
 
-            if copy_result.returncode == 0:
-                log_success(f"Database backup: {backup_file}")
-                return backup_file
-
-    log_warning("Could not retrieve database backup file")
+    log_warning("Could not retrieve dump file")
     return None
 
 
@@ -220,7 +221,7 @@ def cleanup_old_backups(backup_dir: Path, keep_count: int) -> None:
     log_info(f"Cleaning up old backups (keeping {keep_count} most recent)...")
 
     backups = sorted(
-        backup_dir.glob("gitlab-backup-*.tar.gz"),
+        backup_dir.glob("forgejo-backup-*.tar.gz"),
         key=lambda p: p.stat().st_mtime,
         reverse=True
     )
@@ -229,21 +230,20 @@ def cleanup_old_backups(backup_dir: Path, keep_count: int) -> None:
         log_info(f"Removing old backup: {old_backup.name}")
         old_backup.unlink()
 
-    # Also cleanup old database backups
-    db_backups = sorted(
-        backup_dir.glob("gitlab-db-backup-*.tar"),
+    dumps = sorted(
+        backup_dir.glob("forgejo-dump-*.zip"),
         key=lambda p: p.stat().st_mtime,
         reverse=True
     )
 
-    for old_backup in db_backups[keep_count:]:
-        log_info(f"Removing old database backup: {old_backup.name}")
-        old_backup.unlink()
+    for old_dump in dumps[keep_count:]:
+        log_info(f"Removing old dump: {old_dump.name}")
+        old_dump.unlink()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Backup a self-hosted GitLab instance"
+        description="Backup a self-hosted Forgejo instance"
     )
     parser.add_argument(
         "--backup-dir",
@@ -252,10 +252,10 @@ def main():
         help="Directory to store backups (default: ./backups)"
     )
     parser.add_argument(
-        "--gitlab-home",
+        "--forgejo-home",
         type=Path,
         default=None,
-        help="GITLAB_HOME directory (default: $GITLAB_HOME or /srv/gitlab)"
+        help="FORGEJO_HOME directory (default: $FORGEJO_HOME or /srv/forgejo)"
     )
     parser.add_argument(
         "--include-logs",
@@ -265,7 +265,7 @@ def main():
     parser.add_argument(
         "--no-db-backup",
         action="store_true",
-        help="Skip database backup using gitlab-rake"
+        help="Skip forgejo dump"
     )
     parser.add_argument(
         "--keep",
@@ -281,63 +281,54 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate Docker is running
     if not check_docker_running():
         log_error("Docker is not running or not accessible")
         sys.exit(1)
 
-    # Get GitLab container
-    container_name = get_gitlab_container_name()
+    container_name = get_forgejo_container_name()
     if not container_name:
-        log_warning("Could not find running GitLab container")
+        log_warning("Could not find running Forgejo container")
     else:
-        log_info(f"Found GitLab container: {container_name}")
+        log_info(f"Found Forgejo container: {container_name}")
 
-    # Get paths
-    gitlab_home = args.gitlab_home or get_gitlab_home()
-    log_info(f"GitLab home: {gitlab_home}")
+    forgejo_home = args.forgejo_home or get_forgejo_home()
+    log_info(f"Forgejo home: {forgejo_home}")
 
-    # Verify GitLab directories exist
-    if not (gitlab_home / "config").exists():
-        log_error(f"GitLab config directory not found: {gitlab_home / 'config'}")
+    if not forgejo_home.exists():
+        log_error(f"Forgejo home directory not found: {forgejo_home}")
         sys.exit(1)
 
-    # Create backup directory
     backup_dir = create_backup_directory(args.backup_dir)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     print(f"\n{Colors.BOLD}{'=' * 50}{Colors.RESET}")
-    print(f"{Colors.BOLD}GitLab Backup{Colors.RESET}")
+    print(f"{Colors.BOLD}Forgejo Backup{Colors.RESET}")
     print(f"{Colors.BOLD}{'=' * 50}{Colors.RESET}\n")
 
-    # Create filesystem backup
     archive_path = create_backup_archive(
-        gitlab_home=gitlab_home,
+        forgejo_home=forgejo_home,
         backup_dir=backup_dir,
         timestamp=timestamp,
         include_logs=args.include_logs,
     )
 
-    # Create database backup
-    db_backup_path = None
+    dump_path = None
     if not args.no_db_backup and container_name:
-        db_backup_path = create_database_backup(
+        dump_path = create_forgejo_dump(
             container_name=container_name,
             backup_dir=backup_dir,
             timestamp=timestamp,
         )
 
-    # Cleanup old backups
     if not args.no_cleanup:
         cleanup_old_backups(backup_dir, args.keep)
 
-    # Summary
     print(f"\n{Colors.BOLD}{Colors.GREEN}Backup complete!{Colors.RESET}")
     print(f"  Archive: {archive_path}")
     print(f"  Size: {archive_path.stat().st_size / (1024**3):.2f} GB")
-    if db_backup_path:
-        print(f"  Database: {db_backup_path}")
-        print(f"  DB Size: {db_backup_path.stat().st_size / (1024**2):.2f} MB")
+    if dump_path:
+        print(f"  Dump: {dump_path}")
+        print(f"  Dump size: {dump_path.stat().st_size / (1024**2):.2f} MB")
 
 
 if __name__ == "__main__":

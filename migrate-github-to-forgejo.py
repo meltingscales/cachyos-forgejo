@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""
+migrate-github-to-forgejo.py
+
+Migrates all GitHub repositories for a user to a self-hosted Forgejo instance.
+Uses mirror clones to preserve all branches, tags, and refs.
+
+Usage:
+    python migrate-github-to-forgejo.py
+
+Variables can be set in a .env file in the working directory, or as environment variables.
+
+Required variables:
+    GITHUB_USERNAME   GitHub username to migrate repos from
+    GITHUB_TOKEN      GitHub personal access token (needs repo scope)
+    FORGEJO_URL       Base URL of the target Forgejo instance (e.g. https://forgejo.example.com)
+    FORGEJO_TOKEN     Forgejo personal access token (needs write:repository scope)
+
+Optional variables:
+    INCLUDE_FORKS     Set to 'true' to include forked repositories (default: false)
+
+The script will:
+    1. Fetch all repos from GitHub (excluding forks by default)
+    2. Mirror-clone each repo locally into ./migration-workspace/
+    3. Create the corresponding repository on Forgejo if it doesn't exist
+    4. Push the mirror to Forgejo, preserving visibility (public/private)
+
+Re-running the script is safe: existing mirrors are updated and re-pushed.
+"""
+
+import os
+import subprocess
+import sys
+from datetime import datetime
+
+import requests
+
+if os.path.exists('.env'):
+    from dotenv import load_dotenv
+    load_dotenv()
+
+WORKSPACE = "./migration-workspace/"
+GITHUB_USERNAME = os.getenv('GITHUB_USERNAME')
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+FORGEJO_URL = os.getenv('FORGEJO_URL', '').rstrip('/')
+FORGEJO_TOKEN = os.getenv('FORGEJO_TOKEN')
+INCLUDE_FORKS = os.getenv('INCLUDE_FORKS', 'false').lower() == 'true'
+
+
+def github_headers():
+    return {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json',
+    }
+
+
+def forgejo_headers():
+    return {
+        'Authorization': f'token {FORGEJO_TOKEN}',
+        'Content-Type': 'application/json',
+    }
+
+
+def get_github_repos():
+    repos = []
+    page = 1
+
+    while True:
+        url = f'https://api.github.com/user/repos?page={page}&per_page=100&type=all'
+        response = requests.get(url, headers=github_headers())
+
+        if response.status_code != 200:
+            print(f"Error fetching GitHub repos (HTTP {response.status_code}): {response.text}", file=sys.stderr)
+            sys.exit(1)
+
+        remaining = int(response.headers.get('X-RateLimit-Remaining', 1))
+        if remaining == 0:
+            reset_time = response.headers.get('X-RateLimit-Reset', 'unknown')
+            print(f"GitHub API rate limit reached. Resets at: {reset_time}", file=sys.stderr)
+            sys.exit(1)
+
+        page_repos = response.json()
+        if not page_repos:
+            break
+
+        repos.extend(page_repos)
+        page += 1
+
+    if not INCLUDE_FORKS:
+        forks = [r['name'] for r in repos if r.get('fork')]
+        repos = [r for r in repos if not r.get('fork')]
+        if forks:
+            print(f"Skipping {len(forks)} fork(s): {', '.join(forks)}")
+            print("  (set INCLUDE_FORKS=true to include them)")
+
+    return repos
+
+
+def get_forgejo_username():
+    response = requests.get(f'{FORGEJO_URL}/api/v1/user', headers=forgejo_headers())
+    if response.status_code != 200:
+        print(f"Error fetching Forgejo user (HTTP {response.status_code}): {response.text}", file=sys.stderr)
+        sys.exit(1)
+    return response.json()['login']
+
+
+def get_or_create_forgejo_repo(forgejo_username, repo_name, repo_description, is_private):
+    response = requests.get(
+        f'{FORGEJO_URL}/api/v1/repos/{forgejo_username}/{repo_name}',
+        headers=forgejo_headers(),
+    )
+    if response.status_code == 200:
+        return response.json()['clone_url']
+
+    payload = {
+        'name': repo_name,
+        'description': repo_description or '',
+        'private': is_private,
+        'auto_init': False,
+    }
+    response = requests.post(
+        f'{FORGEJO_URL}/api/v1/user/repos',
+        headers=forgejo_headers(),
+        json=payload,
+    )
+    if response.status_code not in (200, 201):
+        print(f"  Error creating Forgejo repo {repo_name} (HTTP {response.status_code}): {response.text}", file=sys.stderr)
+        return None
+
+    print(f"  Created Forgejo repo: {forgejo_username}/{repo_name} ({'private' if is_private else 'public'})")
+    return response.json()['clone_url']
+
+
+def authenticated_forgejo_push_url(clone_url):
+    """Embed the Forgejo token into the HTTPS remote URL."""
+    host = FORGEJO_URL.removeprefix('https://').removeprefix('http://')
+    scheme = 'https' if FORGEJO_URL.startswith('https') else 'http'
+    return f'{scheme}://{FORGEJO_TOKEN}@{host}/{clone_url.split(host, 1)[1].lstrip("/")}'
+
+
+def authenticated_github_clone_url(full_name):
+    return f'https://{GITHUB_TOKEN}@github.com/{full_name}.git'
+
+
+def run(cmd, cwd=None, label=''):
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  Error running {label or ' '.join(cmd)}:", file=sys.stderr)
+        if result.stderr:
+            print(f"  {result.stderr.strip()}", file=sys.stderr)
+    return result.returncode == 0
+
+
+def mirror_or_update(github_url, local_path):
+    if os.path.exists(local_path):
+        print(f"  Updating mirror...")
+        return run(['git', 'remote', 'update', '--prune'], cwd=local_path, label='git remote update')
+    else:
+        print(f"  Cloning mirror...")
+        return run(['git', 'clone', '--mirror', github_url, local_path], label='git clone --mirror')
+
+
+def push_mirror(local_path, forgejo_push_url):
+    print(f"  Pushing to Forgejo...")
+    return run(['git', 'push', '--mirror', forgejo_push_url], cwd=local_path, label='git push --mirror')
+
+
+def write_log(results):
+    os.makedirs(WORKSPACE, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(WORKSPACE, f"migration_log_{timestamp}.txt")
+
+    succeeded = [name for name, ok in results.items() if ok]
+    failed = [name for name, ok in results.items() if not ok]
+
+    with open(log_file, 'w') as f:
+        f.write(f"GitHub -> Forgejo Migration Log\n")
+        f.write(f"Timestamp: {datetime.now()}\n")
+        f.write(f"Total: {len(results)}  Succeeded: {len(succeeded)}  Failed: {len(failed)}\n\n")
+
+        f.write("Succeeded:\n")
+        for name in succeeded:
+            f.write(f"  {name}\n")
+
+        if failed:
+            f.write("\nFailed:\n")
+            for name in failed:
+                f.write(f"  {name}\n")
+
+    print(f"\nLog written to: {log_file}")
+
+
+def main():
+    missing = [v for v in ('GITHUB_USERNAME', 'GITHUB_TOKEN', 'FORGEJO_URL', 'FORGEJO_TOKEN') if not os.getenv(v)]
+    if missing:
+        print(f"Error: missing environment variables: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+
+    os.makedirs(WORKSPACE, exist_ok=True)
+
+    print(f"GitHub -> Forgejo migration")
+    print(f"  GitHub user  : {GITHUB_USERNAME}")
+    print(f"  Forgejo URL  : {FORGEJO_URL}")
+    print(f"  Workspace    : {os.path.abspath(WORKSPACE)}")
+    print()
+
+    print("Fetching GitHub repositories...")
+    repos = get_github_repos()
+    print(f"Found {len(repos)} repository/repositories to migrate\n")
+
+    print("Fetching Forgejo user...")
+    forgejo_username = get_forgejo_username()
+    print(f"Forgejo username: {forgejo_username}\n")
+
+    results = {}
+
+    for repo in repos:
+        repo_name = repo['name']
+        full_name = repo['full_name']
+        print(f"[{repo_name}]")
+
+        local_path = os.path.join(WORKSPACE, repo_name + '.git')
+        github_url = authenticated_github_clone_url(full_name)
+
+        if not mirror_or_update(github_url, local_path):
+            results[repo_name] = False
+            continue
+
+        forgejo_clone_url = get_or_create_forgejo_repo(
+            forgejo_username,
+            repo_name,
+            repo.get('description'),
+            repo.get('private', True),
+        )
+        if not forgejo_clone_url:
+            results[repo_name] = False
+            continue
+
+        forgejo_push_url = authenticated_forgejo_push_url(forgejo_clone_url)
+        ok = push_mirror(local_path, forgejo_push_url)
+        results[repo_name] = ok
+        print(f"  {'OK' if ok else 'FAILED'}")
+
+    write_log(results)
+
+    succeeded = sum(1 for ok in results.values() if ok)
+    print(f"\nDone: {succeeded}/{len(results)} repositories migrated successfully.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-GitLab Restore Script
+Forgejo Restore Script
 
-Restores a self-hosted GitLab instance from a backup.
-Restores configuration, data, and database.
+Restores a self-hosted Forgejo instance from a backup.
 """
 
 import argparse
@@ -55,10 +54,10 @@ def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProce
     return result
 
 
-def get_gitlab_home() -> Path:
-    """Get the GITLAB_HOME directory from environment or default."""
-    gitlab_home = os.environ.get("GITLAB_HOME", "/srv/gitlab")
-    return Path(gitlab_home)
+def get_forgejo_home() -> Path:
+    """Get the FORGEJO_HOME directory from environment or default."""
+    forgejo_home = os.environ.get("FORGEJO_HOME", "/srv/forgejo")
+    return Path(forgejo_home)
 
 
 def check_docker_running() -> bool:
@@ -70,11 +69,17 @@ def check_docker_running() -> bool:
         return False
 
 
-def get_gitlab_container_name() -> str | None:
-    """Get the name of the running GitLab container."""
+def get_forgejo_container_name() -> str | None:
+    """Get the name of the running Forgejo container."""
     try:
         result = run_command(
-            ["docker", "ps", "--filter", "ancestor=gitlab/gitlab-ce", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", "ancestor=codeberg.org/forgejo/forgejo:14", "--format", "{{.Names}}"],
+            check=False
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split("\n")[0]
+        result = run_command(
+            ["docker", "ps", "--filter", "name=forgejo", "--format", "{{.Names}}"],
             check=False
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -84,28 +89,28 @@ def get_gitlab_container_name() -> str | None:
     return None
 
 
-def stop_gitlab(container_name: str | None) -> None:
-    """Stop the GitLab container."""
+def stop_forgejo(container_name: str | None) -> None:
+    """Stop the Forgejo container."""
     if container_name:
-        log_info(f"Stopping GitLab container: {container_name}")
+        log_info(f"Stopping Forgejo container: {container_name}")
         run_command(["docker", "stop", container_name], check=False)
     else:
-        log_warning("No GitLab container found to stop")
+        log_warning("No Forgejo container found to stop")
 
 
-def start_gitlab() -> None:
-    """Start GitLab using docker-compose."""
+def start_forgejo() -> None:
+    """Start Forgejo using docker-compose."""
     repo_root = Path(__file__).parent.parent
     compose_file = repo_root / "docker-compose.yml"
 
     if compose_file.exists():
-        log_info("Starting GitLab with docker-compose...")
+        log_info("Starting Forgejo with docker-compose...")
         run_command([
             "docker-compose", "-f", str(compose_file), "up", "-d"
         ])
     else:
         log_warning("docker-compose.yml not found, attempting to start container...")
-        run_command(["docker", "start", "gitlab"], check=False)
+        run_command(["docker", "start", "forgejo"], check=False)
 
 
 def extract_backup(archive_path: Path, extract_dir: Path) -> Path:
@@ -116,10 +121,8 @@ def extract_backup(archive_path: Path, extract_dir: Path) -> Path:
         log_error(f"Backup file not found: {archive_path}")
         sys.exit(1)
 
-    # Create extraction directory
     extract_dir.mkdir(parents=True, exist_ok=True)
 
-    # Extract the archive
     with tarfile.open(archive_path, "r:gz") as tar:
         tar.extractall(path=extract_dir.parent)
 
@@ -127,25 +130,21 @@ def extract_backup(archive_path: Path, extract_dir: Path) -> Path:
     return extract_dir
 
 
-def restore_directories(extract_dir: Path, gitlab_home: Path, force: bool = False) -> None:
-    """Restore GitLab directories from the extracted backup."""
-    log_info("Restoring GitLab directories...")
+def restore_directories(extract_dir: Path, forgejo_home: Path, force: bool = False) -> None:
+    """Restore Forgejo directories from the extracted backup."""
+    log_info("Restoring Forgejo directories...")
 
-    # Backup directories to restore
-    dirs_to_restore = ["config", "data"]
+    dirs_to_restore = ["gitea", "git", "ssh", "avatars", "attachments", "lfs", "packages", "log"]
 
     for dir_name in dirs_to_restore:
         src_dir = extract_dir / dir_name
-        dest_dir = gitlab_home / dir_name
+        dest_dir = forgejo_home / dir_name
 
         if not src_dir.exists():
-            log_warning(f"Directory not in backup: {dir_name}")
             continue
 
-        # Create destination parent directory if needed
         dest_dir.parent.mkdir(parents=True, exist_ok=True)
 
-        # Handle existing directory
         if dest_dir.exists():
             if not force:
                 response = input(
@@ -163,96 +162,11 @@ def restore_directories(extract_dir: Path, gitlab_home: Path, force: bool = Fals
         shutil.copytree(src_dir, dest_dir)
         log_success(f"Restored {dir_name} to {dest_dir}")
 
-    # Restore logs if present
-    logs_dir = extract_dir / "logs"
-    if logs_dir.exists():
-        dest_logs = gitlab_home / "logs"
-        if dest_logs.exists():
-            if not force:
-                response = input(
-                    f"{Colors.YELLOW}Directory {dest_logs} already exists. "
-                    f"Replace it? [y/N]: {Colors.RESET}"
-                )
-                if response.lower() != "y":
-                    log_warning("Skipping logs")
-                    return
-
-            shutil.rmtree(dest_logs)
-        shutil.copytree(logs_dir, dest_logs)
-        log_success(f"Restored logs to {dest_logs}")
-
-
-def restore_database(
-    db_backup_path: Path,
-    container_name: str | None,
-    force: bool = False,
-) -> bool:
-    """Restore the GitLab database from a backup file."""
-    if not db_backup_path.exists():
-        log_error(f"Database backup not found: {db_backup_path}")
-        return False
-
-    if not container_name:
-        log_error("GitLab container not found, cannot restore database")
-        return False
-
-    log_info(f"Restoring database from: {db_backup_path}")
-
-    if not force:
-        response = input(
-            f"{Colors.YELLOW}{Colors.BOLD}This will replace the current database. "
-            f"Are you sure? [y/N]: {Colors.RESET}"
-        )
-        if response.lower() != "y":
-            log_warning("Database restore cancelled")
-            return False
-
-    # Copy backup to container
-    container_backup_path = "/var/opt/gitlab/backups/"
-    backup_filename = db_backup_path.name
-
-    log_info("Copying database backup to container...")
-    run_command([
-        "docker", "cp",
-        str(db_backup_path),
-        f"{container_name}:{container_backup_path}{backup_filename}"
-    ])
-
-    # Set proper permissions
-    run_command([
-        "docker", "exec", container_name,
-        "chown", "git:git", f"{container_backup_path}{backup_filename}"
-    ])
-
-    # Run the restore command
-    log_info("Restoring database (this may take a while)...")
-    result = run_command([
-        "docker", "exec", container_name,
-        "gitlab-rake", "gitlab:backup:restore", f"BACKUP={backup_filename.rsplit('.', 1)[0]}"
-    ], check=False)
-
-    if result.returncode == 0:
-        log_success("Database restored successfully")
-        return True
-    else:
-        log_error("Database restore failed")
-        return False
-
 
 def list_available_backups(backup_dir: Path) -> list[Path]:
     """List available backup archives."""
     backups = sorted(
-        backup_dir.glob("gitlab-backup-*.tar.gz"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
-    return backups
-
-
-def list_available_db_backups(backup_dir: Path) -> list[Path]:
-    """List available database backup files."""
-    backups = sorted(
-        backup_dir.glob("gitlab-db-backup-*.tar"),
+        backup_dir.glob("forgejo-backup-*.tar.gz"),
         key=lambda p: p.stat().st_mtime,
         reverse=True
     )
@@ -261,7 +175,7 @@ def list_available_db_backups(backup_dir: Path) -> list[Path]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Restore a self-hosted GitLab instance from backup"
+        description="Restore a self-hosted Forgejo instance from backup"
     )
     parser.add_argument(
         "--backup-dir",
@@ -276,16 +190,10 @@ def main():
         help="Specific backup archive to restore"
     )
     parser.add_argument(
-        "--db-backup",
+        "--forgejo-home",
         type=Path,
         default=None,
-        help="Specific database backup to restore"
-    )
-    parser.add_argument(
-        "--gitlab-home",
-        type=Path,
-        default=None,
-        help="GITLAB_HOME directory (default: $GITLAB_HOME or /srv/gitlab)"
+        help="FORGEJO_HOME directory (default: $FORGEJO_HOME or /srv/forgejo)"
     )
     parser.add_argument(
         "--force",
@@ -293,19 +201,14 @@ def main():
         help="Skip confirmation prompts"
     )
     parser.add_argument(
-        "--no-db-restore",
-        action="store_true",
-        help="Skip database restore"
-    )
-    parser.add_argument(
         "--stop",
         action="store_true",
-        help="Stop GitLab before restore"
+        help="Stop Forgejo before restore"
     )
     parser.add_argument(
         "--start",
         action="store_true",
-        help="Start GitLab after restore"
+        help="Start Forgejo after restore"
     )
     parser.add_argument(
         "--list",
@@ -315,7 +218,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Handle list command
     if args.list:
         backup_dir = args.backup_dir
         if not backup_dir.exists():
@@ -336,29 +238,15 @@ def main():
         else:
             log_warning("No archive backups found")
 
-        db_backups = list_available_db_backups(backup_dir)
-        if db_backups:
-            print(f"\n{Colors.BOLD}Database backups:{Colors.RESET}")
-            for i, backup in enumerate(db_backups, 1):
-                mtime = backup.stat().st_mtime
-                size_mb = backup.stat().st_size / (1024**2)
-                import datetime
-                dt = datetime.datetime.fromtimestamp(mtime)
-                print(f"  {i}. {backup.name} ({dt.strftime('%Y-%m-%d %H:%M:%S')}, {size_mb:.2f} MB)")
-        else:
-            log_warning("No database backups found")
-
         sys.exit(0)
 
-    # Get paths
-    gitlab_home = args.gitlab_home or get_gitlab_home()
+    forgejo_home = args.forgejo_home or get_forgejo_home()
     backup_dir = args.backup_dir
 
     if not backup_dir.exists():
         log_error(f"Backup directory not found: {backup_dir}")
         sys.exit(1)
 
-    # Determine which backup to restore
     if args.archive:
         archive_path = args.archive
     else:
@@ -368,64 +256,39 @@ def main():
             sys.exit(1)
         archive_path = archives[0]
 
-    # Determine which database backup to restore
-    db_backup_path = None
-    if not args.no_db_restore:
-        if args.db_backup:
-            db_backup_path = args.db_backup
-        else:
-            db_backups = list_available_db_backups(backup_dir)
-            if db_backups:
-                db_backup_path = db_backups[0]
-
     print(f"\n{Colors.BOLD}{'=' * 50}{Colors.RESET}")
-    print(f"{Colors.BOLD}GitLab Restore{Colors.RESET}")
+    print(f"{Colors.BOLD}Forgejo Restore{Colors.RESET}")
     print(f"{Colors.BOLD}{'=' * 50}{Colors.RESET}\n")
     print(f"Archive: {archive_path}")
-    if db_backup_path:
-        print(f"Database: {db_backup_path}")
-    print(f"Target: {gitlab_home}")
+    print(f"Target: {forgejo_home}")
     print()
 
-    # Check Docker
     if not check_docker_running():
         log_error("Docker is not running or not accessible")
         sys.exit(1)
 
-    # Get GitLab container
-    container_name = get_gitlab_container_name()
+    container_name = get_forgejo_container_name()
     if container_name:
-        log_info(f"Found GitLab container: {container_name}")
+        log_info(f"Found Forgejo container: {container_name}")
     else:
-        log_warning("Could not find running GitLab container")
+        log_warning("Could not find running Forgejo container")
 
-    # Stop GitLab if requested
     if args.stop and container_name:
-        stop_gitlab(container_name)
+        stop_forgejo(container_name)
 
-    # Extract backup
     temp_dir = backup_dir / f"temp-restore-{archive_path.stem}"
     try:
         extract_dir = extract_backup(archive_path, temp_dir)
-
-        # Restore directories
-        restore_directories(extract_dir, gitlab_home, force=args.force)
-
-        # Restore database
-        if not args.no_db_restore and db_backup_path and container_name:
-            restore_database(db_backup_path, container_name, force=args.force)
-
+        restore_directories(extract_dir, forgejo_home, force=args.force)
     finally:
-        # Clean up temp directory
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
 
-    # Start GitLab if requested
     if args.start:
-        start_gitlab()
+        start_forgejo()
 
     print(f"\n{Colors.BOLD}{Colors.GREEN}Restore complete!{Colors.RESET}")
-    print(f"{Colors.YELLOW}Remember to verify your GitLab instance is working correctly.{Colors.RESET}")
+    print(f"{Colors.YELLOW}Remember to verify your Forgejo instance is working correctly.{Colors.RESET}")
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
-# Justfile for GitLab backup and restore operations
+# Justfile for Forgejo backup and restore operations
 # https://github.com/casey/just
 
 # Default recipe
 default:
     @just --list
 
-# GITLAB_HOME directory (override with: just GITLAB_HOME=/custom/path backup)
-GITLAB_HOME := env_var_or_default("GITLAB_HOME", "/srv/gitlab")
+# FORGEJO_HOME directory (override with: just FORGEJO_HOME=/custom/path backup)
+FORGEJO_HOME := env_var_or_default("FORGEJO_HOME", "/srv/forgejo")
 
 # Backup directory
 BACKUP_DIR := "./backups"
@@ -17,61 +17,61 @@ KEEP := "7"
 # Python interpreter
 PYTHON := "python3"
 
-# Create a full backup (config, data, database)
+# Create a full backup
 backup:
     #!/usr/bin/env bash
     mkdir -p {{BACKUP_DIR}}
-    {{PYTHON}} scripts/backup.py --backup-dir {{BACKUP_DIR}} --gitlab-home {{GITLAB_HOME}} --keep {{KEEP}}
+    {{PYTHON}} scripts/backup.py --backup-dir {{BACKUP_DIR}} --forgejo-home {{FORGEJO_HOME}} --keep {{KEEP}}
 
 # Create a backup including logs
 backup-with-logs:
     #!/usr/bin/env bash
     mkdir -p {{BACKUP_DIR}}
-    {{PYTHON}} scripts/backup.py --backup-dir {{BACKUP_DIR}} --gitlab-home {{GITLAB_HOME}} --keep {{KEEP}} --include-logs
+    {{PYTHON}} scripts/backup.py --backup-dir {{BACKUP_DIR}} --forgejo-home {{FORGEJO_HOME}} --keep {{KEEP}} --include-logs
 
-# Quick backup (config and data only, no database)
+# Quick backup (no forgejo dump)
 quick-backup:
     #!/usr/bin/env bash
     mkdir -p {{BACKUP_DIR}}
-    {{PYTHON}} scripts/backup.py --backup-dir {{BACKUP_DIR}} --gitlab-home {{GITLAB_HOME}} --keep {{KEEP}} --no-db-backup
+    {{PYTHON}} scripts/backup.py --backup-dir {{BACKUP_DIR}} --forgejo-home {{FORGEJO_HOME}} --keep {{KEEP}} --no-db-backup
 
 # Restore from the latest backup
 restore:
     #!/usr/bin/env bash
-    {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --gitlab-home {{GITLAB_HOME}}
+    {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --forgejo-home {{FORGEJO_HOME}}
 
 # Restore from a specific archive
 restore-archive archive:
     #!/usr/bin/env bash
-    {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --gitlab-home {{GITLAB_HOME}} --archive {{archive}}
+    {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --forgejo-home {{FORGEJO_HOME}} --archive {{archive}}
 
-# Restore and stop/start GitLab around the restore
+# Restore and stop/start Forgejo around the restore
 restore-full:
     #!/usr/bin/env bash
-    {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --gitlab-home {{GITLAB_HOME}} --stop --start
+    {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --forgejo-home {{FORGEJO_HOME}} --stop --start
 
 # List available backups
 list-backups:
     #!/usr/bin/env bash
     {{PYTHON}} scripts/restore.py --backup-dir {{BACKUP_DIR}} --list
 
-# Start GitLab using docker-compose
+# Start Forgejo using docker-compose
 start:
     docker-compose up -d
 
-# Stop GitLab using docker-compose
+# Stop Forgejo using docker-compose
 stop:
     docker-compose down
 
-# Restart GitLab
+# Restart Forgejo
 restart:
     just stop && just start
 
-# View GitLab logs
+# View Forgejo logs
 logs:
     docker-compose logs -f
 
-# View GitLab status
+# View Forgejo status
 status:
     docker-compose ps
 
