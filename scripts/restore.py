@@ -60,6 +60,19 @@ def get_forgejo_home() -> Path:
     return Path(forgejo_home)
 
 
+def check_docker_compose_running() -> bool:
+    """Check if Forgejo Docker Compose services are running."""
+    try:
+        result = run_command(
+            ["docker", "compose", "ps", "--services", "--filter", "status=running"],
+            check=False
+        )
+        # Check if any Forgejo service is running
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
 def check_docker_running() -> bool:
     """Check if Docker is running and accessible."""
     try:
@@ -262,6 +275,14 @@ def main():
     print(f"Archive: {archive_path}")
     print(f"Target: {forgejo_home}")
     print()
+
+    # Safety check: ensure Docker Compose services are NOT running
+    if check_docker_compose_running():
+        log_error("Docker Compose services are running!")
+        log_error("Please stop them first with: docker compose down")
+        log_error("Or use: just stop")
+        log_error("Or use --stop flag to stop them before restore")
+        sys.exit(1)
 
     if not check_docker_running():
         log_error("Docker is not running or not accessible")
