@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 
 class Colors:
     """ANSI color codes for terminal output."""
@@ -53,6 +55,15 @@ def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProce
         log_error(f"Command failed: {result.stderr}")
         sys.exit(1)
     return result
+
+
+def run_command_streaming(cmd: list[str], check: bool = True) -> int:
+    """Run a shell command, streaming its output directly to the terminal."""
+    result = subprocess.run(cmd)
+    if check and result.returncode != 0:
+        log_error(f"Command failed (exit {result.returncode})")
+        sys.exit(1)
+    return result.returncode
 
 
 def get_forgejo_home() -> Path:
@@ -143,17 +154,17 @@ def create_backup_archive(
     temp_dir.mkdir(exist_ok=True)
 
     try:
-        for src_dir, dir_name in dirs_to_backup:
+        for src_dir, dir_name in tqdm(dirs_to_backup, desc="Copying directories", unit="dir"):
             if not src_dir.exists():
-                log_warning(f"Source directory does not exist: {src_dir}")
+                tqdm.write(f"{Colors.YELLOW}[WARNING]{Colors.RESET} Source directory does not exist: {src_dir}")
                 continue
 
             dest_dir = temp_dir / dir_name
-            log_info(f"Copying {dir_name}...")
+            tqdm.write(f"{Colors.BLUE}[INFO]{Colors.RESET} Copying {dir_name}...")
 
             try:
-                run_command([
-                    "rsync", "-a", "--delete",
+                run_command_streaming([
+                    "rsync", "-a", "--delete", "--info=progress2",
                     str(src_dir) + "/", str(dest_dir) + "/"
                 ], check=False)
             except (FileNotFoundError, subprocess.SubprocessError):
@@ -173,8 +184,9 @@ def create_backup_archive(
                 f.write(f"{key}={value}\n")
 
         log_info("Compressing backup...")
-        run_command([
+        run_command_streaming([
             "tar", "-czf", str(archive_path),
+            "--checkpoint=1000", "--checkpoint-action=dot",
             "-C", str(temp_dir.parent),
             temp_dir.name
         ])
@@ -239,8 +251,8 @@ def cleanup_old_backups(backup_dir: Path, keep_count: int) -> None:
         reverse=True
     )
 
-    for old_backup in backups[keep_count:]:
-        log_info(f"Removing old backup: {old_backup.name}")
+    for old_backup in tqdm(backups[keep_count:], desc="Removing old backups", unit="file"):
+        tqdm.write(f"{Colors.BLUE}[INFO]{Colors.RESET} Removing old backup: {old_backup.name}")
         old_backup.unlink()
 
     dumps = sorted(
@@ -249,8 +261,8 @@ def cleanup_old_backups(backup_dir: Path, keep_count: int) -> None:
         reverse=True
     )
 
-    for old_dump in dumps[keep_count:]:
-        log_info(f"Removing old dump: {old_dump.name}")
+    for old_dump in tqdm(dumps[keep_count:], desc="Removing old dumps", unit="file"):
+        tqdm.write(f"{Colors.BLUE}[INFO]{Colors.RESET} Removing old dump: {old_dump.name}")
         old_dump.unlink()
 
 
