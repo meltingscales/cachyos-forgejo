@@ -257,13 +257,18 @@ def validate_repos(succeeded_repos, forgejo_username, sample_count=3):
         # Verify these commits exist on Forgejo via API
         all_valid = True
         for commit in commits:
-            response = requests.get(
-                f'{FORGEJO_URL}/api/v1/repos/{forgejo_username}/{repo_name}/git/commits/{commit}',
-                headers=forgejo_headers(),
-                verify=verify_ssl(),
-                timeout=10
-            )
-            if response.status_code != 200:
+            try:
+                response = requests.get(
+                    f'{FORGEJO_URL}/api/v1/repos/{forgejo_username}/{repo_name}/git/commits/{commit}',
+                    headers=forgejo_headers(),
+                    verify=verify_ssl(),
+                    timeout=30
+                )
+                if response.status_code != 200:
+                    all_valid = False
+                    break
+            except requests.exceptions.ReadTimeout:
+                failed_validations.append((repo_name, "Timeout connecting to Forgejo API"))
                 all_valid = False
                 break
 
