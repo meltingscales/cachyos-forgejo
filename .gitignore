@@ -1,3 +1,4 @@
 .env
 caddy-ca.crt
 migration-workspace/
+backups/
