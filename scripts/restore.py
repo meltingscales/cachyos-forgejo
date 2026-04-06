@@ -13,6 +13,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+from tqdm import tqdm
+
 
 class Colors:
     """ANSI color codes for terminal output."""
@@ -137,7 +139,11 @@ def extract_backup(archive_path: Path, extract_dir: Path) -> Path:
     extract_dir.mkdir(parents=True, exist_ok=True)
 
     with tarfile.open(archive_path, "r:gz") as tar:
-        tar.extractall(path=extract_dir.parent)
+        members = tar.getmembers()
+        with tqdm(total=len(members), desc="Extracting", unit="file") as pbar:
+            for member in members:
+                tar.extract(member, path=extract_dir.parent, filter="tar")
+                pbar.update(1)
 
     log_success(f"Extracted to: {extract_dir}")
     return extract_dir
@@ -149,7 +155,7 @@ def restore_directories(extract_dir: Path, forgejo_home: Path, force: bool = Fal
 
     dirs_to_restore = ["gitea", "git", "ssh", "avatars", "attachments", "lfs", "packages", "log"]
 
-    for dir_name in dirs_to_restore:
+    for dir_name in tqdm(dirs_to_restore, desc="Restoring directories", unit="dir"):
         src_dir = extract_dir / dir_name
         dest_dir = forgejo_home / dir_name
 
@@ -160,20 +166,21 @@ def restore_directories(extract_dir: Path, forgejo_home: Path, force: bool = Fal
 
         if dest_dir.exists():
             if not force:
+                tqdm.write("")
                 response = input(
                     f"{Colors.YELLOW}Directory {dest_dir} already exists. "
                     f"Replace it? [y/N]: {Colors.RESET}"
                 )
                 if response.lower() != "y":
-                    log_warning(f"Skipping {dir_name}")
+                    tqdm.write(f"{Colors.YELLOW}[WARNING]{Colors.RESET} Skipping {dir_name}")
                     continue
 
-            log_info(f"Removing existing directory: {dest_dir}")
+            tqdm.write(f"{Colors.BLUE}[INFO]{Colors.RESET} Removing existing directory: {dest_dir}")
             shutil.rmtree(dest_dir)
 
-        log_info(f"Restoring {dir_name}...")
+        tqdm.write(f"{Colors.BLUE}[INFO]{Colors.RESET} Restoring {dir_name}...")
         shutil.copytree(src_dir, dest_dir)
-        log_success(f"Restored {dir_name} to {dest_dir}")
+        tqdm.write(f"{Colors.GREEN}[SUCCESS]{Colors.RESET} Restored {dir_name} to {dest_dir}")
 
 
 def list_available_backups(backup_dir: Path) -> list[Path]:
