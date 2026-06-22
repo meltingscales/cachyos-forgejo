@@ -2,3 +2,4 @@
 caddy-ca.crt
 migration-workspace/
 backups/
+*.tar.gz
