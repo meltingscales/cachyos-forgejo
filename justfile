@@ -119,7 +119,7 @@ volume-usage:
 
 # Make scripts executable
 setup:
-    chmod +x scripts/backup.py scripts/restore.py scripts/volume-usage.py
+    chmod +x scripts/backup.py scripts/restore.py scripts/volume-usage.py scripts/migrate-repo-single.py
     mkdir -p {{BACKUP_DIR}}
     echo "Setup complete. Scripts are now executable."
 
@@ -150,6 +150,30 @@ migrate-github-all:
         exit 1
     fi
     INCLUDE_FORKS=true uv run migrate-github-to-forgejo.py
+
+# Migrate a single Git repository (any remote) to Forgejo
+# Usage: just migrate-repo-single <remote-url> [repo-name] [public]
+# Examples:
+#   just migrate-repo-single https://github.com/user/repo.git
+#   just migrate-repo-single git@github.com:user/repo.git my-repo
+#   just migrate-repo-single https://github.com/user/repo.git repo public
+migrate-repo-single remote name="" visibility="private":
+    #!/usr/bin/env bash
+    if [ ! -f ".env" ]; then
+        echo "Error: .env file not found"
+        echo "Create a .env file with:"
+        echo "  FORGEJO_URL=https://your-forgejo-instance"
+        echo "  FORGEJO_TOKEN=your_forgejo_token"
+        exit 1
+    fi
+    args="--remote {{remote}}"
+    if [ -n "{{name}}" ]; then
+        args="$args --name {{name}}"
+    fi
+    if [ "{{visibility}}" = "public" ]; then
+        args="$args --public"
+    fi
+    uv run scripts/migrate-repo-single.py $args
 
 # Verify backup integrity (extracts to temp and checks)
 verify-backup archive:
