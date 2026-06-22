@@ -58,7 +58,7 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 ## Notes
 
 - Port 3000 (Forgejo direct access) is now internal only
-- Access Forgejo at `https://kalameet`
+- Access Forgejo at `https://cachyos-framework`
 - SSH Git access uses port 2222
 
 ### SSH Config
@@ -66,8 +66,8 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 To make SSH Git access easier, add to `~/.ssh/config`:
 
 ```
-Host kalameet
-    HostName kalameet
+Host cachyos-framework
+    HostName cachyos-framework
     Port 2222
     User git
     IdentityFile ~/.ssh/id_ed25519

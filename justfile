@@ -131,7 +131,7 @@ migrate-github:
         echo "Create a .env file with:"
         echo "  GITHUB_USERNAME=your_username"
         echo "  GITHUB_TOKEN=your_github_token"
-        echo "  FORGEJO_URL=https://kalameet"
+        echo "  FORGEJO_URL=https://cachyos-framework"
         echo "  FORGEJO_TOKEN=your_forgejo_token"
         exit 1
     fi
@@ -145,7 +145,7 @@ migrate-github-all:
         echo "Create a .env file with:"
         echo "  GITHUB_USERNAME=your_username"
         echo "  GITHUB_TOKEN=your_github_token"
-        echo "  FORGEJO_URL=https://kalameet"
+        echo "  FORGEJO_URL=https://cachyos-framework"
         echo "  FORGEJO_TOKEN=your_forgejo_token"
         exit 1
     fi

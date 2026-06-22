@@ -3,7 +3,7 @@
 	cert_issuer internal
 }
 
-kalameet {
+cachyos-framework {
 	# Reverse proxy to Forgejo
 	reverse_proxy server:3000
 

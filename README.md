@@ -16,7 +16,7 @@ just status
 docker-compose ps
 ```
 
-Forgejo is accessible at **http://kalameet:3000** after first start.
+Forgejo is accessible at **https://cachyos-framework** after first start.
 On first visit, complete the installation wizard to configure your instance.
 
 ## SSH Access
@@ -28,8 +28,8 @@ Forgejo's SSH is mapped to port **2222** (to avoid conflicts with the system SSH
 Add this to your `~/.ssh/config`:
 
 ```
-Host kalameet-forgejo
-    HostName kalameet
+Host cachyos-framework-forgejo
+    HostName cachyos-framework
     Port 2222
     User git
 ```
@@ -37,19 +37,19 @@ Host kalameet-forgejo
 Then you can clone repositories simply as:
 
 ```bash
-git clone kalameet-forgejo:username/repo.git
+git clone cachyos-framework-forgejo:username/repo.git
 ```
 
 ### Alternative: Specify port directly
 
 ```bash
-git clone ssh://git@kalameet:2222/username/repo.git
+git clone ssh://git@cachyos-framework:2222/username/repo.git
 ```
 
 ### HTTPS (no port change needed)
 
 ```bash
-git clone http://kalameet:3000/username/repo.git
+git clone https://cachyos-framework/username/repo.git
 ```
 
 ## Backup & Restore
@@ -106,7 +106,7 @@ To migrate repositories from GitHub to this Forgejo instance:
 # Set required environment variables
 export GITHUB_USERNAME=your-github-username
 export GITHUB_TOKEN=your-github-token
-export FORGEJO_URL=http://kalameet:3000
+export FORGEJO_URL=https://cachyos-framework
 export FORGEJO_TOKEN=your-forgejo-token
 
 python migrate-github-to-forgejo.py
@@ -143,5 +143,6 @@ python migrate-github-to-forgejo.py
 
 | Service | Host Port | Container Port |
 |---------|-----------|----------------|
-| HTTP | 3000 | 3000 |
+| HTTP | 80 | 80 |
+| HTTPS | 443 | 443 |
 | SSH | 2222 | 22 |
